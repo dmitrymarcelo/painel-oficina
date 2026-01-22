@@ -1,0 +1,5 @@
+{
+  "name": "Painel de Controle - Oficina Mecânica",
+  "description": "Uma aplicação Kanban modernizada para gerenciar Ordens de Serviço em uma oficina mecânica, construída com React, TypeScript e Tailwind CSS. Permite arrastar e soltar tarefas, criar, editar, filtrar e buscar ordens de serviço, com persistência de dados no navegador.",
+  "requestFramePermissions": []
+}
