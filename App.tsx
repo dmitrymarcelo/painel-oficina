@@ -33,6 +33,20 @@ const App: React.FC = () => {
     
     const [toast, setToast] = useState<ToastMessage | null>(null);
 
+    // Sincronização em tempo real entre abas do navegador
+    useEffect(() => {
+        const handleStorageChange = (e: StorageEvent) => {
+            if (e.key === 'oficina_ordens_servico' && e.newValue) {
+                setOrdensServico(JSON.parse(e.newValue));
+            }
+            if (e.key === 'oficina_vehicle_database' && e.newValue) {
+                setVehicleDatabase(JSON.parse(e.newValue));
+            }
+        };
+        window.addEventListener('storage', handleStorageChange);
+        return () => window.removeEventListener('storage', handleStorageChange);
+    }, [setOrdensServico, setVehicleDatabase]);
+
     const showToast = useCallback((message: string, type: 'success' | 'error' | 'warning' | 'info' = 'success') => {
         setToast({ id: Date.now(), message, type });
         setTimeout(() => setToast(null), 3000);
