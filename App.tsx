@@ -1,31 +1,33 @@
 
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
-import { OrdemServico, Vehicle, Status, ToastMessage, Filters, StatusChange } from './types';
-import { INITIAL_OS_DATA, INITIAL_VEHICLE_DATA, COLUMNS } from './constants';
+import React, { useState, useMemo, useCallback } from 'react';
+import { OrdemServico, Vehicle, Status, ToastMessage, Filters, StatusChange, ViewType, PreventiveItem, VehicleModel } from './types';
+import { INITIAL_OS_DATA, COLUMNS } from './constants';
 import { useLocalStorage } from './hooks/useLocalStorage';
 import { useDebounce } from './hooks/useDebounce';
 import { getNextId } from './utils/formatters';
-import { generateSimulationData } from './utils/simulation';
 
 import Header from './components/Header';
 import StatsBar from './components/StatsBar';
-import TimeStatsBar from './components/TimeStatsBar';
 import KanbanBoard from './components/KanbanBoard';
 import OsModal from './components/OsModal';
 import FilterModal from './components/FilterModal';
 import ReportsModal from './components/ReportsModal';
-import BaseManagementModal from './components/BaseManagementModal';
+import FleetManagementView from './components/FleetManagementView';
+import PreventiveMaintenanceView from './components/PreventiveMaintenanceView';
+import VehicleModelsView from './components/VehicleModelsView';
 import QrCodeModal from './components/QrCodeModal';
 import Toast from './components/Toast';
 
 const App: React.FC = () => {
+    const [view, setView] = useState<ViewType>('dashboard');
     const [ordensServico, setOrdensServico] = useLocalStorage<OrdemServico[]>('oficina_ordens_servico', INITIAL_OS_DATA);
-    const [vehicleDatabase, setVehicleDatabase] = useLocalStorage<Vehicle[]>('oficina_vehicle_database', INITIAL_VEHICLE_DATA);
+    const [vehicleDatabase, setVehicleDatabase] = useLocalStorage<Vehicle[]>('oficina_vehicle_database', []);
+    const [preventiveDatabase, setPreventiveDatabase] = useLocalStorage<PreventiveItem[]>('oficina_preventive_database', []);
+    const [vehicleModels, setVehicleModels] = useLocalStorage<VehicleModel[]>('oficina_vehicle_models', []);
     
     const [isOsModalOpen, setIsOsModalOpen] = useState(false);
     const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
     const [isReportsModalOpen, setIsReportsModalOpen] = useState(false);
-    const [isBaseModalOpen, setIsBaseModalOpen] = useState(false);
     const [isQrModalOpen, setIsQrModalOpen] = useState(false);
     
     const [editingOs, setEditingOs] = useState<OrdemServico | null>(null);
@@ -42,204 +44,37 @@ const App: React.FC = () => {
         setTimeout(() => setToast(null), 3000);
     }, []);
 
-    const handleSimulate = useCallback(() => {
-        const nextId = getNextId(ordensServico);
-        const simulatedData = generateSimulationData(nextId);
-        setOrdensServico(prev => [...prev, ...simulatedData]);
-        showToast('20 novas O.S. simuladas com sucesso!', 'success');
-    }, [ordensServico, setOrdensServico, showToast]);
+    const operationStatus = useMemo(() => {
+        const osAtivas = ordensServico.filter(os => !['finalizado', 'entregue'].includes(os.status));
+        if (osAtivas.length === 0) return 'ESTÁVEL';
+        const agora = new Date().getTime();
+        const gargalos = osAtivas.filter(os => (agora - new Date(os.dataEntrada).getTime()) / 3600000 >= 48).length;
+        return gargalos > osAtivas.length * 0.3 ? 'SOB PRESSÃO' : 'FLUXO SAUDÁVEL';
+    }, [ordensServico]);
 
-    const handleImportData = useCallback((data: any) => {
-        try {
-            if (data.ordensServico) setOrdensServico(data.ordensServico);
-            if (data.vehicleDatabase) setVehicleDatabase(data.vehicleDatabase);
-            showToast('Dados restaurados com sucesso!', 'success');
-        } catch (e) {
-            showToast('Erro ao processar arquivo de backup.', 'error');
-        }
-    }, [setOrdensServico, setVehicleDatabase, showToast]);
-
-    const handleNewOsClick = useCallback(() => {
-        setEditingOs(null);
-        setIsOsModalOpen(true);
-    }, []);
-
-    const handleEditOs = useCallback((os: OrdemServico) => {
-        setEditingOs(os);
-        setIsOsModalOpen(true);
-    }, []);
-
-    const handleShowQr = useCallback((os: OrdemServico) => {
-        setSelectedOsForQr(os);
-        setIsQrModalOpen(true);
-    }, []);
-
-    const handleDeleteOs = useCallback((id: number) => {
-        if (window.confirm(`Tem certeza que deseja excluir a O.S. #${id}?`)) {
-            setOrdensServico(prev => prev.filter(os => os.id !== id));
-            showToast('O.S. excluída com sucesso!', 'success');
-        }
-    }, [setOrdensServico, showToast]);
-    
-    const handleSaveOs = useCallback((osData: Omit<OrdemServico, 'id' | 'history'>) => {
-        if (editingOs) {
-            setOrdensServico(prev => prev.map(os => {
-                if (os.id === editingOs.id) {
-                    const updatedOs = { ...os, ...osData, id: editingOs.id };
-                    if (osData.status !== editingOs.status) {
-                        const newHistoryEntry: StatusChange = {
-                            status: osData.status,
-                            timestamp: new Date().toISOString()
-                        };
-                        updatedOs.history = [...(os.history || []), newHistoryEntry];
-                    }
-                    return updatedOs;
-                }
-                return os;
-            }));
-            showToast('O.S. atualizada com sucesso!', 'success');
-        } else {
-            const newOs: OrdemServico = { 
-                ...osData, 
-                id: getNextId(ordensServico),
-                history: [{ status: osData.status, timestamp: osData.dataEntrada }]
-            };
-            setOrdensServico(prev => [...prev, newOs]);
-            showToast('Nova O.S. criada com sucesso!', 'success');
-        }
-        setIsOsModalOpen(false);
-        setEditingOs(null);
-    }, [editingOs, setOrdensServico, showToast, ordensServico]);
-
-    const handleStatusChange = useCallback((id: number, newStatus: Status) => {
-        setOrdensServico(prev => {
-            const updated = prev.map(os => {
-                if (os.id === id) {
-                    if (os.status === newStatus) return os;
-
-                    const oldStatus = os.status;
-                    const isNowFinished = ['finalizado', 'entregue'].includes(newStatus);
-                    const wasFinished = ['finalizado', 'entregue'].includes(oldStatus);
-                    
-                    const updatedOs: OrdemServico = { ...os, status: newStatus };
-
-                    if (isNowFinished && !wasFinished) {
-                        updatedOs.tempoFinal = new Date().toISOString();
-                        updatedOs.dataFinalizacao = updatedOs.tempoFinal;
-                    } else if (!isNowFinished && wasFinished) {
-                        updatedOs.tempoFinal = null;
-                        updatedOs.dataFinalizacao = null;
-                    }
-
-                    const newHistoryEntry: StatusChange = {
-                        status: newStatus,
-                        timestamp: new Date().toISOString(),
-                    };
-                    updatedOs.history = [...(os.history || []), newHistoryEntry];
-
-                    return updatedOs;
-                }
-                return os;
-            });
-            return updated;
-        });
-        showToast(`Status da O.S. #${id} alterado.`, 'info');
-    }, [setOrdensServico, showToast]);
-
-    const filteredOrdensServico = useMemo(() => {
-        const lowerSearch = debouncedSearchTerm.trim().toLowerCase();
-        return ordensServico.filter(os => {
-            const searchMatch = lowerSearch === '' ||
-                os.placa.toLowerCase().includes(lowerSearch) ||
-                os.veiculo.toLowerCase().includes(lowerSearch) ||
-                os.servico.toLowerCase().includes(lowerSearch) ||
-                os.id.toString().includes(lowerSearch);
-
-            const priorityMatch = !filters.priority || os.prioridade === filters.priority;
-            const statusMatch = !filters.status || os.status === filters.status;
-            const dateFromMatch = !filters.dateFrom || new Date(os.dataEntrada) >= new Date(filters.dateFrom);
-            const dateToMatch = !filters.dateTo || new Date(os.dataEntrada) <= new Date(filters.dateTo + 'T23:59:59');
-
-            return searchMatch && priorityMatch && statusMatch && dateFromMatch && dateToMatch;
-        });
-    }, [ordensServico, debouncedSearchTerm, filters]);
-    
     return (
         <div className="flex flex-col h-screen overflow-hidden bg-app-bg text-slate-900 font-sans text-sm">
-            <Header
-                onNewOsClick={handleNewOsClick}
-                onFilterClick={() => setIsFilterModalOpen(true)}
-                onReportsClick={() => setIsReportsModalOpen(true)}
-                onBaseClick={() => setIsBaseModalOpen(true)}
-                onImportData={handleImportData}
-                onSimulate={handleSimulate}
-                searchTerm={searchTerm}
-                onSearchChange={setSearchTerm}
-                showToast={showToast}
-            />
+            <Header currentView={view} onViewChange={setView} onNewOsClick={() => setIsOsModalOpen(true)} onFilterClick={() => setIsFilterModalOpen(true)} onReportsClick={() => setIsReportsModalOpen(true)} searchTerm={searchTerm} onSearchChange={setSearchTerm} showToast={showToast} operationStatus={operationStatus} />
             
-            <main className="flex-1 flex flex-col p-4 gap-4 overflow-hidden">
-                <div className="flex-shrink-0">
-                    <TimeStatsBar ordensServico={ordensServico} />
-                    <StatsBar ordensServico={ordensServico} />
-                </div>
-                
-                <KanbanBoard
-                    ordensServico={filteredOrdensServico}
-                    columns={COLUMNS}
-                    onStatusChange={handleStatusChange}
-                    onEditOs={handleEditOs}
-                    onDeleteOs={handleDeleteOs}
-                    onShowQr={handleShowQr}
-                />
+            <main className="flex-1 flex flex-col p-4 gap-4 overflow-hidden relative">
+                {view === 'fleet' ? (
+                    <FleetManagementView vehicleDatabase={vehicleDatabase} setVehicleDatabase={setVehicleDatabase} setOrdensServico={setOrdensServico} showToast={showToast} onBack={() => setView('dashboard')} />
+                ) : view === 'preventive' ? (
+                    <PreventiveMaintenanceView preventiveData={preventiveDatabase} setPreventiveData={setPreventiveDatabase} vehicleDatabase={vehicleDatabase} vehicleModels={vehicleModels} showToast={showToast} onBack={() => setView('dashboard')} />
+                ) : view === 'vehicle-models' ? (
+                    <VehicleModelsView models={vehicleModels} setModels={setVehicleModels} showToast={showToast} onBack={() => setView('dashboard')} />
+                ) : (
+                    <>
+                        <StatsBar ordensServico={ordensServico} />
+                        <KanbanBoard ordensServico={ordensServico.filter(os => (!debouncedSearchTerm || os.placa.includes(debouncedSearchTerm.toUpperCase())))} columns={COLUMNS} onStatusChange={(id, status) => setOrdensServico(prev => prev.map(os => os.id === id ? {...os, status} : os))} onEditOs={os => { setEditingOs(os); setIsOsModalOpen(true); }} onDeleteOs={id => setOrdensServico(prev => prev.filter(os => os.id !== id))} onShowQr={os => { setSelectedOsForQr(os); setIsQrModalOpen(true); }} />
+                    </>
+                )}
             </main>
 
-            {isOsModalOpen && (
-                <OsModal
-                    isOpen={isOsModalOpen}
-                    onClose={() => setIsOsModalOpen(false)}
-                    onSave={handleSaveOs}
-                    os={editingOs}
-                    vehicleDatabase={vehicleDatabase}
-                    showToast={showToast}
-                />
-            )}
-
-            {isFilterModalOpen && (
-                <FilterModal
-                    isOpen={isFilterModalOpen}
-                    onClose={() => setIsFilterModalOpen(false)}
-                    onApplyFilters={setFilters}
-                    currentFilters={filters}
-                />
-            )}
-
-            {isReportsModalOpen && (
-                <ReportsModal
-                    isOpen={isReportsModalOpen}
-                    onClose={() => setIsReportsModalOpen(false)}
-                    ordensServico={ordensServico}
-                />
-            )}
-
-            {isBaseModalOpen && (
-                <BaseManagementModal
-                    isOpen={isBaseModalOpen}
-                    onClose={() => setIsBaseModalOpen(false)}
-                    vehicleDatabase={vehicleDatabase}
-                    setVehicleDatabase={setVehicleDatabase}
-                    showToast={showToast}
-                />
-            )}
-
-            {isQrModalOpen && selectedOsForQr && (
-                <QrCodeModal
-                    isOpen={isQrModalOpen}
-                    onClose={() => setIsQrModalOpen(false)}
-                    os={selectedOsForQr}
-                />
-            )}
-
+            {isOsModalOpen && <OsModal isOpen={isOsModalOpen} onClose={() => { setIsOsModalOpen(false); setEditingOs(null); }} onSave={os => { if (editingOs) setOrdensServico(prev => prev.map(x => x.id === editingOs.id ? {...x, ...os} : x)); else setOrdensServico(prev => [...prev, { ...os, id: getNextId(prev), history: [] }]); setIsOsModalOpen(false); }} os={editingOs} vehicleDatabase={vehicleDatabase} preventiveDatabase={preventiveDatabase} showToast={showToast} />}
+            {isFilterModalOpen && <FilterModal isOpen={isFilterModalOpen} onClose={() => setIsFilterModalOpen(false)} onApplyFilters={setFilters} currentFilters={filters} />}
+            {isReportsModalOpen && <ReportsModal isOpen={isReportsModalOpen} onClose={() => setIsReportsModalOpen(false)} ordensServico={ordensServico} />}
+            {isQrModalOpen && selectedOsForQr && <QrCodeModal isOpen={isQrModalOpen} onClose={() => setIsQrModalOpen(false)} os={selectedOsForQr} />}
             {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
         </div>
     );
