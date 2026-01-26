@@ -16,6 +16,7 @@ import FleetManagementView from './components/FleetManagementView';
 import PreventiveMaintenanceView from './components/PreventiveMaintenanceView';
 import VehicleModelsView from './components/VehicleModelsView';
 import QrCodeModal from './components/QrCodeModal';
+import PasswordModal from './components/PasswordModal';
 import Toast from './components/Toast';
 
 const App: React.FC = () => {
@@ -29,9 +30,11 @@ const App: React.FC = () => {
     const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
     const [isReportsModalOpen, setIsReportsModalOpen] = useState(false);
     const [isQrModalOpen, setIsQrModalOpen] = useState(false);
+    const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
     
     const [editingOs, setEditingOs] = useState<OrdemServico | null>(null);
     const [selectedOsForQr, setSelectedOsForQr] = useState<OrdemServico | null>(null);
+    const [pendingTransition, setPendingTransition] = useState<{id: number, status: Status} | null>(null);
     
     const [searchTerm, setSearchTerm] = useState('');
     const debouncedSearchTerm = useDebounce(searchTerm, 300);
@@ -52,6 +55,37 @@ const App: React.FC = () => {
         return gargalos > osAtivas.length * 0.3 ? 'SOB PRESSÃO' : 'FLUXO SAUDÁVEL';
     }, [ordensServico]);
 
+    const handleStatusChangeRequest = (id: number, status: Status) => {
+        const os = ordensServico.find(o => o.id === id);
+        if (os && os.status === status) return;
+        
+        setPendingTransition({ id, status });
+        setIsPasswordModalOpen(true);
+    };
+
+    const confirmStatusChange = () => {
+        if (!pendingTransition) return;
+        
+        setOrdensServico(prev => prev.map(os => {
+            if (os.id === pendingTransition.id) {
+                const historyEntry: StatusChange = {
+                    status: pendingTransition.status,
+                    timestamp: new Date().toISOString()
+                };
+                return {
+                    ...os,
+                    status: pendingTransition.status,
+                    history: [...(os.history || []), historyEntry]
+                };
+            }
+            return os;
+        }));
+        
+        setPendingTransition(null);
+        setIsPasswordModalOpen(false);
+        showToast('Status atualizado com sucesso!', 'success');
+    };
+
     return (
         <div className="flex flex-col h-screen overflow-hidden bg-app-bg text-slate-900 font-sans text-sm">
             <Header currentView={view} onViewChange={setView} onNewOsClick={() => setIsOsModalOpen(true)} onFilterClick={() => setIsFilterModalOpen(true)} onReportsClick={() => setIsReportsModalOpen(true)} searchTerm={searchTerm} onSearchChange={setSearchTerm} showToast={showToast} operationStatus={operationStatus} />
@@ -66,7 +100,7 @@ const App: React.FC = () => {
                 ) : (
                     <>
                         <StatsBar ordensServico={ordensServico} />
-                        <KanbanBoard ordensServico={ordensServico.filter(os => (!debouncedSearchTerm || os.placa.includes(debouncedSearchTerm.toUpperCase())))} columns={COLUMNS} onStatusChange={(id, status) => setOrdensServico(prev => prev.map(os => os.id === id ? {...os, status} : os))} onEditOs={os => { setEditingOs(os); setIsOsModalOpen(true); }} onDeleteOs={id => setOrdensServico(prev => prev.filter(os => os.id !== id))} onShowQr={os => { setSelectedOsForQr(os); setIsQrModalOpen(true); }} />
+                        <KanbanBoard ordensServico={ordensServico.filter(os => (!debouncedSearchTerm || os.placa.includes(debouncedSearchTerm.toUpperCase())))} columns={COLUMNS} onStatusChange={handleStatusChangeRequest} onEditOs={os => { setEditingOs(os); setIsOsModalOpen(true); }} onDeleteOs={id => setOrdensServico(prev => prev.filter(os => os.id !== id))} onShowQr={os => { setSelectedOsForQr(os); setIsQrModalOpen(true); }} />
                     </>
                 )}
             </main>
@@ -75,6 +109,13 @@ const App: React.FC = () => {
             {isFilterModalOpen && <FilterModal isOpen={isFilterModalOpen} onClose={() => setIsFilterModalOpen(false)} onApplyFilters={setFilters} currentFilters={filters} />}
             {isReportsModalOpen && <ReportsModal isOpen={isReportsModalOpen} onClose={() => setIsReportsModalOpen(false)} ordensServico={ordensServico} />}
             {isQrModalOpen && selectedOsForQr && <QrCodeModal isOpen={isQrModalOpen} onClose={() => setIsQrModalOpen(false)} os={selectedOsForQr} />}
+            {isPasswordModalOpen && (
+                <PasswordModal 
+                    isOpen={isPasswordModalOpen} 
+                    onClose={() => { setIsPasswordModalOpen(false); setPendingTransition(null); }} 
+                    onSuccess={confirmStatusChange} 
+                />
+            )}
             {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
         </div>
     );

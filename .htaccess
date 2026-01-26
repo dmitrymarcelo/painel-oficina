@@ -1,0 +1,21 @@
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+  
+  # Redireciona para o index.html se o arquivo ou diretório solicitado não existir
+  RewriteRule ^index\.html$ - [L]
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule . /index.html [L]
+</IfModule>
+
+# Garante que arquivos .tsx e módulos JS sejam servidos com o MIME type correto
+<IfModule mod_mime.c>
+  AddType application/javascript .tsx
+  AddType application/javascript .jsx
+  AddType application/javascript .js
+</IfModule>
+
+# Desativa a listagem de diretórios por segurança
+Options -Indexes
